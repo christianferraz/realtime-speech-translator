@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .asr import FasterWhisperASR, SpeechRecognizer, Transcript
+from .asr import SpeechRecognizer, Transcript, create_recognizer
 from .config import Settings
 from .languages import AUTO, language_name
 from .mt import Translator, create_translator
@@ -109,7 +109,7 @@ class Pipeline:
     @property
     def recognizer(self) -> SpeechRecognizer:
         if self._recognizer is None:
-            self._recognizer = FasterWhisperASR(self.settings.asr)
+            self._recognizer = create_recognizer(self.settings.asr)
         return self._recognizer
 
     @property

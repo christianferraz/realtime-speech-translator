@@ -23,6 +23,8 @@ classifiers = [
 
 dependencies = [
     "faster-whisper>=1.1,<2",
+    # Apple Silicon GPU for Whisper; selected automatically on those Macs.
+    "mlx-whisper>=0.4,<1; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "transformers>=4.44,<5",
     "torch>=2.2",
     "sentencepiece>=0.2,<1",

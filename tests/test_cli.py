@@ -21,7 +21,7 @@ class TestParser:
     def test_defaults(self) -> None:
         args = build_parser().parse_args(["--tgt", "es"])
         assert args.src == "auto"
-        assert args.asr_model == "base"
+        assert args.asr_model == "auto"
         assert args.tts == "auto"
         assert not args.no_speak
 

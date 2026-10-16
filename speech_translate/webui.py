@@ -531,7 +531,9 @@ def build_demo(settings: Settings | None = None, preload: bool = False):
 
         gr.Markdown(
             "---\n"
-            f"Models: `faster-whisper {settings.asr.model}` · `{settings.mt.model}` · `Piper`  \n"
+            f"Models: `Whisper {settings.asr.resolved_model()}` "
+            f"({'Apple GPU' if settings.asr.resolved_backend() == 'mlx' else 'CPU'}) · "
+            f"`{settings.mt.model}` · `Piper`  \n"
             "[Source on GitHub](https://github.com/christianferraz/realtime-speech-translator)"
         )
 
@@ -614,7 +616,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--share", action="store_true", help="Create a public Gradio link.")
     parser.add_argument("--tgt", default="es", help="Initial target language.")
     parser.add_argument("--src", default=AUTO, help="Initial source language.")
-    parser.add_argument("--asr-model", default="base", help="faster-whisper model.")
+    parser.add_argument(
+        "--asr-model", default="auto", help="Whisper model (auto: small on a Mac GPU, else base)."
+    )
+    parser.add_argument(
+        "--asr-backend", default="auto", choices=("auto", "faster-whisper", "mlx")
+    )
     parser.add_argument(
         "--mt-model", default=MTSettings.model, help="Translation model."
     )
@@ -628,7 +635,7 @@ def main(argv: list[str] | None = None) -> int:
     settings = Settings(
         src=args.src,
         tgt=args.tgt,
-        asr=ASRSettings(model=args.asr_model, device=args.device),
+        asr=ASRSettings(model=args.asr_model, backend=args.asr_backend, device=args.device),
         mt=MTSettings(model=args.mt_model, device=args.device),
         tts=TTSSettings(backend="auto"),
     )

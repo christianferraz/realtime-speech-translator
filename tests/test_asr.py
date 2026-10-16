@@ -6,6 +6,8 @@ weights are downloaded.
 
 from __future__ import annotations
 
+import sys
+import types
 from dataclasses import dataclass
 
 import numpy as np
@@ -13,7 +15,9 @@ import pytest
 
 from speech_translate.asr import (
     FasterWhisperASR,
+    MLXWhisperASR,
     Transcript,
+    create_recognizer,
     _looks_like_hallucination,
 )
 from speech_translate.config import ASRSettings
@@ -166,3 +170,88 @@ class TestDecodingOptions:
 
 def test_transcript_is_falsy_when_empty() -> None:
     assert not Transcript(text="", language="eng_Latn")
+
+
+class TestBackendSelection:
+    """MLX on an Apple Silicon GPU, faster-whisper everywhere else."""
+
+    def test_auto_uses_mlx_when_available(self, monkeypatch) -> None:
+        monkeypatch.setattr("speech_translate.config._mlx_available", lambda: True)
+        settings = ASRSettings()
+        assert settings.resolved_backend() == "mlx"
+        assert settings.resolved_model() == "small"
+
+    def test_auto_falls_back_to_cpu_base(self, monkeypatch) -> None:
+        monkeypatch.setattr("speech_translate.config._mlx_available", lambda: False)
+        settings = ASRSettings()
+        assert settings.resolved_backend() == "faster-whisper"
+        assert settings.resolved_model() == "base"
+
+    def test_explicit_device_means_faster_whisper(self, monkeypatch) -> None:
+        monkeypatch.setattr("speech_translate.config._mlx_available", lambda: True)
+        assert ASRSettings(device="cpu").resolved_backend() == "faster-whisper"
+
+    def test_explicit_model_is_kept(self, monkeypatch) -> None:
+        monkeypatch.setattr("speech_translate.config._mlx_available", lambda: True)
+        assert ASRSettings(model="small").resolved_model() == "small"
+
+    def test_model_without_mlx_conversion_falls_back(self, monkeypatch) -> None:
+        monkeypatch.setattr("speech_translate.config._mlx_available", lambda: True)
+        recognizer = create_recognizer(ASRSettings(model="distil-small.en"))
+        assert isinstance(recognizer, FasterWhisperASR)
+
+    def test_forcing_mlx_with_unknown_model_is_an_error(self) -> None:
+        with pytest.raises(ValueError, match="No MLX conversion"):
+            create_recognizer(ASRSettings(model="distil-small.en", backend="mlx"))
+
+
+class TestMLXWhisperASR:
+    @pytest.fixture
+    def fake_mlx(self, monkeypatch):
+        calls: list[dict] = []
+        result: dict = {"language": "pt", "segments": []}
+        module = types.ModuleType("mlx_whisper")
+
+        def transcribe(audio, **kwargs):  # noqa: ANN001, ANN202
+            calls.append(kwargs)
+            return result
+
+        module.transcribe = transcribe
+        monkeypatch.setitem(sys.modules, "mlx_whisper", module)
+        return calls, result
+
+    def segment(self, text: str, no_speech: float = 0.1, logprob: float = -0.2) -> dict:
+        return {"text": text, "no_speech_prob": no_speech, "avg_logprob": logprob}
+
+    def test_model_name_maps_to_mlx_repo(self) -> None:
+        assert MLXWhisperASR(ASRSettings(model="base")).repo == "mlx-community/whisper-base-mlx"
+        assert MLXWhisperASR(ASRSettings(model="org/custom")).repo == "org/custom"
+
+    def test_detected_language_reaches_the_transcript(self, fake_mlx) -> None:
+        _, result = fake_mlx
+        result["segments"] = [self.segment(" Olá, tudo bem? ")]
+        transcript = MLXWhisperASR(ASRSettings(model="base")).transcribe(np.zeros(16_000))
+        assert transcript.text == "Olá, tudo bem?"
+        assert transcript.language == "por_Latn"
+
+    def test_pinned_language_is_passed_as_whisper_code(self, fake_mlx) -> None:
+        calls, _ = fake_mlx
+        MLXWhisperASR(ASRSettings(model="base")).transcribe(np.zeros(16_000), "por_Latn")
+        assert calls[0]["language"] == "pt"
+        assert calls[0]["condition_on_previous_text"] is False
+
+    def test_silence_and_low_confidence_segments_are_dropped(self, fake_mlx) -> None:
+        _, result = fake_mlx
+        result["segments"] = [
+            self.segment("kept"),
+            self.segment("silence", no_speech=0.9),
+            self.segment("mumble", logprob=-2.0),
+        ]
+        transcript = MLXWhisperASR(ASRSettings(model="base")).transcribe(np.zeros(16_000))
+        assert transcript.text == "kept"
+
+    def test_hallucinations_are_discarded(self, fake_mlx) -> None:
+        _, result = fake_mlx
+        result["segments"] = [self.segment("Thank you for watching.")]
+        transcript = MLXWhisperASR(ASRSettings(model="base")).transcribe(np.zeros(16_000))
+        assert transcript.text == ""

@@ -116,13 +116,16 @@ def run_benchmark(
     load_start = time.perf_counter()
     pipeline.warmup()
     load_seconds = time.perf_counter() - load_start
+    mlx = settings.asr.resolved_backend() == "mlx"
 
     result = BenchmarkResult(
-        label="faster-whisper + NLLB-200 + Piper",
-        asr_model=settings.asr.model,
+        label=f"{'MLX Whisper' if mlx else 'faster-whisper'} + NLLB-200 + Piper",
+        asr_model=settings.asr.resolved_model(),
         mt_model=settings.mt.model.split("/")[-1],
         tts_backend=getattr(pipeline.tts, "voice", None) or pipeline.tts.name,
-        device=_describe_device(settings.asr.resolved_device()),
+        device="Apple GPU (MLX) for ASR"
+        if mlx
+        else _describe_device(settings.asr.resolved_device()),
         audio_seconds=len(audio) / settings.audio.sample_rate,
         repeats=repeats,
         load_seconds=load_seconds,
@@ -178,7 +181,7 @@ def run_legacy_benchmark(
     device = settings.asr.resolved_device()
 
     load_start = time.perf_counter()
-    asr = whisper.load_model(settings.asr.model, device=device)
+    asr = whisper.load_model(settings.asr.resolved_model(), device=device)
     mt_name = "facebook/m2m100_418M"
     mt = M2M100ForConditionalGeneration.from_pretrained(mt_name).to(device).eval()
     tokenizer = M2M100Tokenizer.from_pretrained(mt_name)
@@ -189,7 +192,7 @@ def run_legacy_benchmark(
     tgt_iso = flores_to_whisper(settings.tgt) or "es"
     result = BenchmarkResult(
         label="openai-whisper + M2M100-418M (original stack)",
-        asr_model=settings.asr.model,
+        asr_model=settings.asr.resolved_model(),
         mt_model="m2m100_418M",
         tts_backend="excluded (Coqui TTS no longer installs)",
         device=_describe_device(device),
@@ -264,7 +267,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--src", default="auto", help="Source language (default: auto).")
     parser.add_argument("--tgt", default="es", help="Target language (default: es).")
     parser.add_argument("--repeats", type=int, default=5, help="Timed runs (default: 5).")
-    parser.add_argument("--asr-model", default="base", help="faster-whisper model.")
+    parser.add_argument("--asr-model", default="auto", help="Whisper model.")
+    parser.add_argument(
+        "--asr-backend", default="auto", choices=("auto", "faster-whisper", "mlx")
+    )
     parser.add_argument(
         "--mt-model", default=MTSettings.model, help="Translation model."
     )
@@ -297,7 +303,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             src=args.src,
             tgt=args.tgt,
             asr=ASRSettings(
-                model=args.asr_model, device=args.device, compute_type=args.compute_type
+                model=args.asr_model,
+                backend=args.asr_backend,
+                device=args.device,
+                compute_type=args.compute_type,
             ),
             mt=MTSettings(model=args.mt_model, device=args.device),
             tts=TTSSettings(backend="none" if args.no_tts else args.tts),

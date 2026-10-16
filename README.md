@@ -23,10 +23,20 @@ em outro idioma com legenda e voz traduzidas quase em tempo real.
   tradutor no volume que você escolher, e abaixa sozinha enquanto a tradução fala.
 - **Português do Brasil.** O idioma aparece como "Portuguese (Brazil)". `--tgt pt-BR`,
   `pt`, `português` e `portuguese` funcionam.
-- **Tradução melhor e mais rápida.** NLLB-200 1.3B como padrão, rodando em CTranslate2
-  int8, e cada frase traduzida separadamente.
+- **Tradução melhor.** NLLB-200 1.3B como padrão, rodando em CTranslate2 int8 (mais
+  rápido que PyTorch), com cada frase traduzida separadamente.
+- **Reconhecimento na GPU do Mac.** Em Apple Silicon, o Whisper roda na GPU via
+  [MLX](https://github.com/ml-explore/mlx), automaticamente.
 - **A captura nunca espera a tradução.** O processamento roda numa thread separada, então
   o atraso não se acumula com o tempo.
+
+## Requisitos
+
+- Mac com Apple Silicon (M1 ou mais novo) para o reconhecimento na GPU. Em outros
+  computadores roda na CPU, só que mais devagar.
+- Python 3.10 ou mais novo.
+- ~14 GB livres em disco para os modelos.
+- Chrome ou Edge para traduzir o áudio de outra aba.
 
 ## Começando (macOS)
 
@@ -51,11 +61,11 @@ Abra http://127.0.0.1:7860 para a interface. Em um terminal novo, rode antes
 `source .venv/bin/activate` dentro da pasta do projeto, ou chame o comando pelo caminho
 completo, sem ativar nada: `.venv/bin/speech-translate-web --preload --tgt pt-BR`.
 
-Na primeira execução os modelos são baixados: ~11 GB, quase tudo do tradutor 1.3B, que
-vem em dois formatos. O tradutor também é convertido para CTranslate2 uma única vez
-(~1,5 min, mais 2,6 GB). No total são ~14 GB em disco, em `~/.cache/huggingface` e
-`~/.cache/speech_translate`. Depois disso, o
-servidor sobe em ~6 s.
+Na primeira execução os modelos são baixados: ~11,5 GB, quase tudo do tradutor 1.3B (que
+vem em dois formatos), mais ~0,5 GB do Whisper. O tradutor também é convertido para
+CTranslate2 uma única vez (~1,5 min, mais 2,6 GB). No total são ~14 GB em disco, em
+`~/.cache/huggingface` e `~/.cache/speech_translate`. Depois disso, o servidor sobe em
+~6 s.
 
 ## Traduzindo uma aba do navegador
 
@@ -96,23 +106,42 @@ frase.
 
 | Etapa | Modelo | Observação |
 |---|---|---|
-| Reconhecimento de fala | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) `base` | int8 em CPU, 8 threads |
+| Reconhecimento de fala | Whisper `small` via [mlx-whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper) | GPU do Mac (Apple Silicon) |
+| (sem GPU da Apple) | Whisper `base` via [faster-whisper](https://github.com/SYSTRAN/faster-whisper) | int8 em CPU, 8 threads |
 | Tradução | [NLLB-200 distilled 1.3B](https://huggingface.co/facebook/nllb-200-distilled-1.3B) | CTranslate2 int8; 600M no Hugging Face Space |
 | Voz | [Piper](https://github.com/OHF-Voice/piper1-gpl) | voz brasileira `pt_BR-cadu-medium` |
 
 98 idiomas disponíveis, 48 deles com voz. Os outros saem só como legenda.
 
+Para áudio difícil (ruído, sotaque, termos técnicos), use o Whisper mais preciso:
+`--asr-model large-v3-turbo`. Ele é mais lento ao vivo (~0,75 s em vez de ~0,34 s no fim
+de cada frase). Para forçar a CPU: `--asr-backend faster-whisper`.
+
 ## Desempenho
 
-Medido num Apple M4 Max, só CPU.
+Medido num Apple M4 Max.
 
 **Ao vivo**, com um áudio de 9,6 s em português tocado no ritmo real da fala:
 
 | | Projeto original | Este fork |
 |---|---|---|
-| Primeiro texto na tela | só depois de uma pausa | ~2,2 s depois de começar a falar |
-| Frase final depois da pausa | ~1,4 s (estimado: 0,6 s de pausa + 0,8 s de processamento) | ~0,4 s (medido) |
+| Primeiro texto na tela | só depois de uma pausa | ~2,1 s depois de começar a falar |
+| Frase final depois da pausa | ~1,4 s (estimado: 0,6 s de pausa + 0,8 s de processamento) | ~0,34 s (medido) |
 | Captura durante a tradução | travava e o atraso acumulava | não trava |
+
+**Reconhecimento (Whisper)**, ao vivo, por chamada:
+
+| Configuração | Tempo | Fim da última frase | Legendas |
+|---|---:|---:|---|
+| CPU `base` | ~290 ms | 0,60 s | ouviu "another doctor" no lugar de "the translator" |
+| GPU `large-v3-turbo` | ~500 ms | 0,75 s | boas |
+| **GPU `small` (padrão)** | **~135 ms** | **0,34 s** | **boas** |
+| GPU `base` | ~60 ms | 0,33 s | erros como no `base` em CPU |
+
+Os testes usaram áudio sintético e limpo; a qualidade em vídeos reais não foi medida.
+
+A tradução continua na CPU: na GPU (PyTorch MPS) o NLLB 1.3B ficou só ~12% mais rápido
+e mudou um pouco o resultado.
 
 **Tradução**, mediana por frase:
 
@@ -131,12 +160,13 @@ Para reproduzir: `speech-translate-bench --audio sample.wav --src pt --tgt en`.
 ```bash
 source .venv/bin/activate
 pip install -e ".[dev,audio,tts,web]"
-pytest -q                            # 205 testes, modelos falsos, sem downloads
+pytest -q                            # 216 testes, modelos falsos, sem downloads
 ```
 
 Onde está cada coisa:
 
 - `speech_translate/live.py`: sessão ao vivo (legendas provisórias, fila de voz)
+- `speech_translate/asr.py`: Whisper na GPU (MLX) ou na CPU (faster-whisper)
 - `speech_translate/webui.py`: interface Gradio, captura de aba e volume do original
 - `speech_translate/audio/vad.py`: detecção de fala e corte das frases
 - `speech_translate/mt.py`: tradução em CTranslate2, com volta automática para PyTorch
@@ -148,7 +178,9 @@ Onde está cada coisa:
 - **As legendas provisórias mudam enquanto a pessoa fala.** O modelo só entende a frase
   com mais contexto. A versão final é a que vale.
 - **Não é simultânea palavra por palavra.** Como a ordem das palavras muda entre idiomas,
-  sobra sempre ~1 s de atraso, como acontece com um intérprete humano.
+  a tradução final de cada frase só sai quando ela termina (~0,34 s depois), e as
+  legendas provisórias ficam cerca de 1 s atrás da fala, como acontece com um intérprete
+  humano.
 - **Termos técnicos.** O NLLB traduz jargão ao pé da letra: "string" vira "cadeia" e
   "borrow" vira "empréstimo".
 - **Música e ruído de fundo** podem ser tratados como fala.

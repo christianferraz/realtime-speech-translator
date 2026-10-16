@@ -65,9 +65,17 @@ def build_parser() -> argparse.ArgumentParser:
     models = parser.add_argument_group("models")
     models.add_argument(
         "--asr-model",
-        default="base",
-        help="faster-whisper model. base (default) keeps up with live speech on a "
-        "CPU; small is more accurate; distil-small.en is a fast English-only option.",
+        default="auto",
+        help="Whisper model. auto (default) is small on an Apple Silicon GPU and base "
+        "on a CPU; large-v3-turbo is the most accurate (slower); distil-small.en is "
+        "a fast English-only option (CPU).",
+    )
+    models.add_argument(
+        "--asr-backend",
+        default="auto",
+        choices=("auto", "faster-whisper", "mlx"),
+        help="Speech recognition runtime (default: auto -> MLX on an Apple Silicon "
+        "GPU when installed, else faster-whisper).",
     )
     models.add_argument(
         "--mt-model",
@@ -156,6 +164,10 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _asr_device(asr: ASRSettings) -> str:
+    return "Apple GPU (MLX)" if asr.resolved_backend() == "mlx" else asr.resolved_device()
+
+
 def settings_from_args(args: argparse.Namespace) -> Settings:
     """Build :class:`Settings` from parsed arguments."""
     return Settings(
@@ -173,6 +185,7 @@ def settings_from_args(args: argparse.Namespace) -> Settings:
         ),
         asr=ASRSettings(
             model=args.asr_model,
+            backend=args.asr_backend,
             device=args.device,
             compute_type=args.compute_type,
             beam_size=args.beam_size,
@@ -309,7 +322,7 @@ def _run_realtime(settings: Settings, save_transcript: str | None) -> int:
     print(
         f">>> {language_name(settings.src) if settings.src != AUTO else 'Auto-detect'}"
         f" -> {language_name(settings.tgt)}"
-        f" | ASR {settings.asr.model} on {settings.asr.resolved_device()}"
+        f" | ASR {settings.asr.resolved_model()} on {_asr_device(settings.asr)}"
         f" | voice {getattr(session.pipeline.tts, 'voice', 'n/a')}"
     )
     try:

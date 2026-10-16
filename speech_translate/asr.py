@@ -1,4 +1,8 @@
-"""Automatic speech recognition on faster-whisper (CTranslate2).
+"""Automatic speech recognition: faster-whisper (CTranslate2) or MLX.
+
+:class:`MLXWhisperASR` runs the same Whisper checkpoints on the GPU of an
+Apple Silicon Mac; :func:`create_recognizer` picks the runtime per
+``ASRSettings.backend``.
 
 Replaces ``openai-whisper``. Same weights, same accuracy, but the CTranslate2
 runtime is markedly faster and uses less memory, and int8 quantisation makes a
@@ -16,7 +20,8 @@ Two bugs from the original implementation are fixed here:
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
+from types import SimpleNamespace
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
@@ -30,7 +35,13 @@ if TYPE_CHECKING:  # pragma: no cover
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Transcript", "SpeechRecognizer", "FasterWhisperASR"]
+__all__ = [
+    "FasterWhisperASR",
+    "MLXWhisperASR",
+    "SpeechRecognizer",
+    "Transcript",
+    "create_recognizer",
+]
 
 
 @dataclass
@@ -76,6 +87,50 @@ _HALLUCINATION_PHRASES = frozenset(
 )
 
 
+def _build_transcript(
+    segments: Iterable[object],
+    settings: ASRSettings,
+    *,
+    language: str,
+    language_probability: float,
+    duration: float,
+) -> Transcript:
+    """Keep the segments that are plausibly speech and join them.
+
+    Each segment needs ``text``, ``no_speech_prob`` and ``avg_logprob``
+    attributes, which both faster-whisper and (wrapped) MLX provide.
+    """
+    kept: list[str] = []
+    no_speech: list[float] = []
+    for segment in segments:
+        prob = float(getattr(segment, "no_speech_prob", 0.0) or 0.0)
+        no_speech.append(prob)
+        if prob > settings.no_speech_threshold:
+            logger.debug("Dropped segment (no_speech_prob=%.2f): %r", prob, segment.text)
+            continue
+        avg_logprob = float(getattr(segment, "avg_logprob", 0.0) or 0.0)
+        if avg_logprob < settings.log_prob_threshold:
+            logger.debug("Dropped low-confidence segment (%.2f): %r", avg_logprob, segment.text)
+            continue
+        text = segment.text.strip()
+        if text:
+            kept.append(text)
+
+    text = " ".join(kept).strip()
+    if _looks_like_hallucination(text):
+        logger.debug("Discarded probable hallucination: %r", text)
+        text = ""
+
+    return Transcript(
+        text=text,
+        language=language,
+        language_probability=language_probability,
+        no_speech_prob=(sum(no_speech) / len(no_speech)) if no_speech else 0.0,
+        duration=duration,
+        segments=kept,
+    )
+
+
 def _looks_like_hallucination(text: str) -> bool:
     stripped = text.strip().lower()
     if not stripped:
@@ -109,9 +164,10 @@ class FasterWhisperASR:
 
         device = self.settings.resolved_device()
         compute_type = self.settings.resolved_compute_type()
+        model = self.settings.resolved_model()
         logger.info(
             "Loading ASR model %s (device=%s, compute_type=%s)",
-            self.settings.model,
+            model,
             device,
             compute_type,
         )
@@ -121,7 +177,7 @@ class FasterWhisperASR:
             "cpu_threads": self.settings.cpu_threads or default_cpu_threads(),
         }
         try:
-            return WhisperModel(self.settings.model, **kwargs)
+            return WhisperModel(model, **kwargs)
         except ValueError:
             # e.g. float16 requested on a device that cannot do it.
             logger.warning(
@@ -130,7 +186,7 @@ class FasterWhisperASR:
                 device,
             )
             kwargs["compute_type"] = "float32"
-            return WhisperModel(self.settings.model, **kwargs)
+            return WhisperModel(model, **kwargs)
 
     def load(self) -> FasterWhisperASR:
         """Force the model to load now (used to keep warm-up out of timings)."""
@@ -163,35 +219,13 @@ class FasterWhisperASR:
             condition_on_previous_text=self.settings.condition_on_previous_text,
         )
 
-        kept: list[str] = []
-        no_speech: list[float] = []
-        for segment in segments:  # generator: this is where decoding happens
-            prob = float(getattr(segment, "no_speech_prob", 0.0) or 0.0)
-            no_speech.append(prob)
-            if prob > self.settings.no_speech_threshold:
-                logger.debug("Dropped segment (no_speech_prob=%.2f): %r", prob, segment.text)
-                continue
-            avg_logprob = float(getattr(segment, "avg_logprob", 0.0) or 0.0)
-            if avg_logprob < self.settings.log_prob_threshold:
-                logger.debug("Dropped low-confidence segment (%.2f): %r", avg_logprob, segment.text)
-                continue
-            text = segment.text.strip()
-            if text:
-                kept.append(text)
-
-        text = " ".join(kept).strip()
-        if _looks_like_hallucination(text):
-            logger.debug("Discarded probable hallucination: %r", text)
-            text = ""
-
-        detected = self._detected_language(info, language)
-        return Transcript(
-            text=text,
-            language=detected,
+        # segments is a generator: this is where decoding actually happens.
+        return _build_transcript(
+            segments,
+            self.settings,
+            language=self._detected_language(info, language),
             language_probability=float(getattr(info, "language_probability", 1.0) or 1.0),
-            no_speech_prob=(sum(no_speech) / len(no_speech)) if no_speech else 0.0,
             duration=duration,
-            segments=kept,
         )
 
     @staticmethod
@@ -211,6 +245,90 @@ class FasterWhisperASR:
         if requested != AUTO:
             return requested
         return "eng_Latn"
+
+
+# Whisper names -> MLX conversions published by mlx-community. Anything with a
+# "/" is taken to be a Hugging Face repo already.
+_MLX_REPOS = {
+    "tiny": "mlx-community/whisper-tiny-mlx",
+    "base": "mlx-community/whisper-base-mlx",
+    "small": "mlx-community/whisper-small-mlx",
+    "medium": "mlx-community/whisper-medium-mlx",
+    "large-v3": "mlx-community/whisper-large-v3-mlx",
+    "large-v3-turbo": "mlx-community/whisper-large-v3-turbo",
+    "turbo": "mlx-community/whisper-large-v3-turbo",
+}
+
+
+class MLXWhisperASR:
+    """Whisper on the Apple Silicon GPU, through MLX.
+
+    Measured on an M4 Max (9.6 s of speech): ``base`` 59 ms versus 241 ms for
+    faster-whisper on 8 CPU threads, and ``large-v3-turbo`` 296 ms versus
+    2.4 s. Same weights, same filtering of silence and hallucinations as
+    :class:`FasterWhisperASR`.
+    """
+
+    def __init__(self, settings: ASRSettings | None = None) -> None:
+        self.settings = settings or ASRSettings()
+        model = self.settings.resolved_model()
+        self.repo = _MLX_REPOS.get(model, model)
+        if "/" not in self.repo:
+            raise ValueError(
+                f"No MLX conversion known for Whisper model {model!r}; pass a Hugging "
+                f"Face repo (e.g. mlx-community/whisper-small-mlx) or one of "
+                f"{', '.join(sorted(_MLX_REPOS))}."
+            )
+        self._loaded = False
+
+    def load(self) -> MLXWhisperASR:
+        """Download and load the weights now, and compile the first graph."""
+        if not self._loaded:
+            logger.info("Loading ASR model %s (MLX, Apple GPU)", self.repo)
+            self.transcribe(np.zeros(16_000, dtype=np.float32), "eng_Latn")
+            self._loaded = True
+        return self
+
+    def transcribe(self, audio: np.ndarray, language: str = AUTO) -> Transcript:
+        import mlx_whisper
+
+        audio = np.ascontiguousarray(audio, dtype=np.float32)
+        whisper_lang = None if language == AUTO else flores_to_whisper(language)
+        result = mlx_whisper.transcribe(
+            audio,
+            path_or_hf_repo=self.repo,
+            language=whisper_lang,
+            no_speech_threshold=self.settings.no_speech_threshold,
+            logprob_threshold=self.settings.log_prob_threshold,
+            condition_on_previous_text=self.settings.condition_on_previous_text,
+            verbose=None,
+        )
+        segments = [SimpleNamespace(**segment) for segment in result.get("segments", [])]
+        return _build_transcript(
+            segments,
+            self.settings,
+            language=FasterWhisperASR._detected_language(
+                SimpleNamespace(language=result.get("language")), language
+            ),
+            language_probability=1.0,
+            duration=len(audio) / 16_000,
+        )
+
+
+def create_recognizer(settings: ASRSettings | None = None) -> SpeechRecognizer:
+    """The recogniser for ``ASRSettings.backend``: MLX on a Mac GPU, else faster-whisper."""
+    settings = settings or ASRSettings()
+    if settings.resolved_backend() == "mlx":
+        try:
+            return MLXWhisperASR(settings)
+        except ValueError:
+            if settings.backend == "mlx":
+                raise
+            logger.warning(
+                "Whisper model %r has no MLX conversion; using faster-whisper on the CPU.",
+                settings.resolved_model(),
+            )
+    return FasterWhisperASR(settings)
 
 
 def load_asr_model(

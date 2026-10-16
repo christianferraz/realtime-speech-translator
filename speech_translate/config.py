@@ -9,6 +9,8 @@ the package testable and safe to import from a web worker.
 from __future__ import annotations
 
 import os
+import platform
+import sys
 from dataclasses import dataclass, field, replace
 from typing import Literal
 
@@ -17,6 +19,7 @@ from .languages import AUTO, resolve_language
 Device = Literal["auto", "cpu", "cuda"]
 TTSBackendName = Literal["auto", "piper", "system", "none"]
 MTBackendName = Literal["auto", "ctranslate2", "transformers"]
+ASRBackendName = Literal["auto", "faster-whisper", "mlx"]
 
 
 def _default_device() -> Device:
@@ -65,15 +68,24 @@ class VADSettings:
 
 @dataclass
 class ASRSettings:
-    """faster-whisper (CTranslate2) settings.
+    """Speech recognition settings.
 
-    ``base`` is the default rather than ``small`` because it is the largest
-    model that stays comfortably ahead of live speech on a CPU: measured
-    end-to-end RTF is 0.61 with ``base`` versus 1.09 with ``small`` on the same
-    machine and clip. Accuracy is one flag away (``--asr-model small``).
+    Two runtimes: faster-whisper (CTranslate2, CPU or CUDA) and MLX, which runs
+    Whisper on the GPU of an Apple Silicon Mac. ``backend='auto'`` picks MLX
+    when it is installed on such a Mac and no device was forced.
+
+    ``model='auto'`` follows the runtime. Measured live on an M4 Max (9.6 s of
+    Portuguese, real-time pace): MLX ``small`` costs ~135 ms per call and
+    delivers the last sentence 0.34 s after speech ends, with captions as good
+    as ``large-v3-turbo`` (~500 ms per call under live load, 0.75 s) and
+    clearly better than CPU ``base`` (~290 ms, 0.60 s), which misheard words
+    that ``small`` got right. ``large-v3-turbo`` is one flag away for noisy or
+    technical audio. On a CPU, ``base`` is the largest model that stays
+    comfortably ahead of live speech.
     """
 
-    model: str = "base"
+    model: str = "auto"
+    backend: ASRBackendName = "auto"
     device: Device = field(default_factory=_default_device)
     #: ``auto`` picks int8 on CPU and float16 on GPU.
     compute_type: str = "auto"
@@ -91,7 +103,21 @@ class ASRSettings:
     #: 0 means :func:`default_cpu_threads`.
     cpu_threads: int = 0
 
+    def resolved_backend(self) -> str:
+        if self.backend != "auto":
+            return self.backend
+        # An explicit --device cpu/cuda is a request for faster-whisper.
+        if self.device == "auto" and _mlx_available():
+            return "mlx"
+        return "faster-whisper"
+
+    def resolved_model(self) -> str:
+        if self.model != "auto":
+            return self.model
+        return "small" if self.resolved_backend() == "mlx" else "base"
+
     def resolved_device(self) -> str:
+        """Device for faster-whisper; MLX always runs on the Apple GPU."""
         if self.device != "auto":
             return self.device
         return "cuda" if _cuda_available() else "cpu"
@@ -192,6 +218,17 @@ def default_cpu_threads() -> int:
     gain is in the noise, and two models share the machine.
     """
     return max(1, min(8, os.cpu_count() or 4))
+
+
+def _mlx_available() -> bool:
+    """Apple Silicon with mlx-whisper installed, checked without importing MLX."""
+    if os.environ.get("SPEECH_TRANSLATE_FORCE_CPU"):
+        return False
+    if sys.platform != "darwin" or platform.machine() != "arm64":
+        return False
+    import importlib.util
+
+    return importlib.util.find_spec("mlx_whisper") is not None
 
 
 def _cuda_available() -> bool:
