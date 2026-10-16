@@ -42,7 +42,7 @@ docker run --rm -p 7860:7860 -v st-cache:/home/app/.cache speech-translate
 | Stage | Model | Why |
 |---|---|---|
 | Speech recognition | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) | Whisper accuracy, int8 on CPU, and it can load distilled checkpoints that `openai-whisper` can't |
-| Translation | [nllb-200-distilled-600M](https://huggingface.co/facebook/nllb-200-distilled-600M) | 200 languages, still maintained, better than M2M100-418M |
+| Translation | [nllb-200-distilled-1.3B](https://huggingface.co/facebook/nllb-200-distilled-1.3B) (600M on the Space) | 200 languages, still maintained, better than M2M100-418M; runs on CTranslate2 int8 |
 | Speech synthesis | [Piper](https://github.com/OHF-Voice/piper1-gpl) | Faster than real time on CPU, 170 voices across 49 languages |
 
 97 source languages, 200 translation targets, 48 of those with a voice. Each stage sits

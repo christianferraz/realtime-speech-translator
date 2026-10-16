@@ -138,6 +138,8 @@ class UtteranceSegmenter:
         self._frames_for_silence = max(1, round(self.settings.min_silence_ms / frame_ms))
         self._max_frames = max(1, round(self.settings.max_utterance_ms / frame_ms))
         pre_roll_frames = max(0, round(self.settings.pre_roll_ms / frame_ms))
+        #: How far back from the length cap to look for a gap between words.
+        self._split_search_frames = max(0, round(600 / frame_ms))
 
         self._state = _State.SILENCE
         self._pre_roll: deque[np.ndarray] = deque(maxlen=pre_roll_frames or 1)
@@ -194,7 +196,36 @@ class UtteranceSegmenter:
                 yield self._emit(truncated=False)
                 return
         if len(self._buffer) >= self._max_frames:
-            yield self._emit(truncated=True)
+            yield self._emit_at_quietest_point()
+
+    def current_audio(self) -> np.ndarray | None:
+        """The utterance captured so far, while the speaker is still talking.
+
+        This is what live captions are drawn from: it lets the caller show a
+        provisional transcript before the speaker pauses.
+        """
+        if self._state is not _State.SPEECH or not self._buffer:
+            return None
+        return np.concatenate(self._buffer)
+
+    def _emit_at_quietest_point(self) -> Utterance:
+        """Emit at the length cap, splitting on the quietest recent frame.
+
+        Cutting exactly at the cap usually lands in the middle of a word, and
+        Whisper then mis-hears both halves. The gap between two words is
+        nearly always within the last fraction of a second, so the cut is
+        moved there and the remainder starts the next utterance.
+        """
+        search = min(len(self._buffer) - 1, self._split_search_frames)
+        tail: list[np.ndarray] = []
+        if search > 0:
+            levels = [rms(frame) for frame in self._buffer[-search:]]
+            cut = len(self._buffer) - search + int(np.argmin(levels)) + 1
+            tail = self._buffer[cut:]
+            self._buffer = self._buffer[:cut]
+        utterance = self._emit(truncated=True)
+        self._buffer = tail
+        return utterance
 
     def flush(self) -> Iterator[Utterance]:
         """Emit any buffered speech, e.g. when the stream stops."""

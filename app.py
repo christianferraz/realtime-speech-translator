@@ -21,7 +21,7 @@ from __future__ import annotations
 import os
 
 from speech_translate.config import ASRSettings, MTSettings, Settings, TTSSettings
-from speech_translate.webui import build_demo
+from speech_translate.webui import build_demo, launch_demo
 
 # Spaces CPUs are modest, so default to the fastest sensible ASR model and let
 # it be overridden with a Space variable.
@@ -29,6 +29,8 @@ settings = Settings(
     src="auto",
     tgt=os.environ.get("TARGET_LANGUAGE", "spa_Latn"),
     asr=ASRSettings(model=os.environ.get("ASR_MODEL", "base"), device="cpu"),
+    # The local default is the 1.3B model; on a free Space's two vCPUs it is
+    # too slow for live use, so the Space keeps the 600M one.
     mt=MTSettings(model="facebook/nllb-200-distilled-600M", device="cpu"),
     tts=TTSSettings(backend="auto"),
 )
@@ -36,4 +38,4 @@ settings = Settings(
 demo = build_demo(settings, preload=False)
 
 if __name__ == "__main__":
-    demo.queue(max_size=8).launch(server_name="0.0.0.0", server_port=7860)
+    launch_demo(demo.queue(max_size=8), server_name="0.0.0.0", server_port=7860)

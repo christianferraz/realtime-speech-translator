@@ -16,6 +16,7 @@ from .languages import AUTO, resolve_language
 
 Device = Literal["auto", "cpu", "cuda"]
 TTSBackendName = Literal["auto", "piper", "system", "none"]
+MTBackendName = Literal["auto", "ctranslate2", "transformers"]
 
 
 def _default_device() -> Device:
@@ -51,10 +52,13 @@ class VADSettings:
     threshold: float = 0.015
     #: Ignore blips shorter than this; they are keyboard clicks, not speech.
     min_speech_ms: int = 250
-    #: Silence this long ends the utterance.
-    min_silence_ms: int = 600
-    #: Hard cap so a monologue still produces output.
-    max_utterance_ms: int = 12_000
+    #: Silence this long ends the utterance. Every millisecond here is added
+    #: to the latency of every sentence, so it is as short as it can be
+    #: without splitting on the gap between two words.
+    min_silence_ms: int = 400
+    #: Hard cap so a monologue still produces output. The cut is moved to the
+    #: quietest nearby frame so it does not land in the middle of a word.
+    max_utterance_ms: int = 6_000
     #: Audio kept from *before* the trigger so we don't clip the first phoneme.
     pre_roll_ms: int = 300
 
@@ -84,6 +88,7 @@ class ASRSettings:
     #: Whisper loops ("Thank you. Thank you. Thank you.") when it can see its
     #: own previous output. In a chunked real-time loop it is pure downside.
     condition_on_previous_text: bool = False
+    #: 0 means :func:`default_cpu_threads`.
     cpu_threads: int = 0
 
     def resolved_device(self) -> str:
@@ -99,12 +104,31 @@ class ASRSettings:
 
 @dataclass
 class MTSettings:
-    """NLLB-200 settings."""
+    """NLLB-200 settings.
 
-    model: str = "facebook/nllb-200-distilled-600M"
+    The 1.3B distilled checkpoint is the default: on an Apple M4 Max it costs
+    ~390 ms per sentence against ~210 ms for 600M, and in exchange it stops
+    mistranslating short stock phrases ("Thank you for watching" -> "Obrigado
+    por me vigiar") and produces Brazilian rather than European Portuguese
+    forms. Small CPUs (a free Space) should pass the 600M model explicitly.
+
+    ``backend='auto'`` runs the model on CTranslate2 (int8 on CPU), which is
+    several times faster than PyTorch for the same checkpoint. The model is
+    converted once on first use and cached; plain ``transformers`` is the
+    fallback when the conversion is not possible.
+    """
+
+    model: str = "facebook/nllb-200-distilled-1.3B"
+    backend: MTBackendName = "auto"
+    #: ``auto`` picks int8 on CPU and float16 on GPU (CTranslate2 only).
+    compute_type: str = "auto"
+    #: Where converted CTranslate2 models are kept.
+    cache_dir: str | None = None
     device: Device = field(default_factory=_default_device)
     num_beams: int = 1
     max_new_tokens: int = 256
+    #: 0 means :func:`default_cpu_threads` (CTranslate2 only).
+    cpu_threads: int = 0
 
     def resolved_device(self) -> str:
         if self.device != "auto":
@@ -158,6 +182,16 @@ class Settings:
             src=resolve_language(src, allow_auto=True) if src else self.src,
             tgt=resolve_language(tgt) if tgt else self.tgt,
         )
+
+
+def default_cpu_threads() -> int:
+    """Threads for a CTranslate2 model when none were configured.
+
+    CTranslate2 defaults to 4, which leaves most of a modern laptop idle;
+    8 measured ~30% faster for Whisper and NLLB on an Apple M4 Max. Past 8 the
+    gain is in the noise, and two models share the machine.
+    """
+    return max(1, min(8, os.cpu_count() or 4))
 
 
 def _cuda_available() -> bool:

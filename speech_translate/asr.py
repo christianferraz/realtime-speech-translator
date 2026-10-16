@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 
-from .config import ASRSettings
+from .config import ASRSettings, default_cpu_threads
 from .languages import AUTO, flores_to_whisper, whisper_to_flores
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -115,9 +115,11 @@ class FasterWhisperASR:
             device,
             compute_type,
         )
-        kwargs: dict[str, object] = {"device": device, "compute_type": compute_type}
-        if self.settings.cpu_threads:
-            kwargs["cpu_threads"] = self.settings.cpu_threads
+        kwargs: dict[str, object] = {
+            "device": device,
+            "compute_type": compute_type,
+            "cpu_threads": self.settings.cpu_threads or default_cpu_threads(),
+        }
         try:
             return WhisperModel(self.settings.model, **kwargs)
         except ValueError:

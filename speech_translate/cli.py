@@ -71,8 +71,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     models.add_argument(
         "--mt-model",
-        default="facebook/nllb-200-distilled-600M",
-        help="Hugging Face translation model.",
+        default=MTSettings.model,
+        help=f"Hugging Face translation model (default: {MTSettings.model}).",
+    )
+    models.add_argument(
+        "--mt-backend",
+        default="auto",
+        choices=("auto", "ctranslate2", "transformers"),
+        help="Translation runtime (default: auto -> CTranslate2, then PyTorch).",
     )
     models.add_argument(
         "--device",
@@ -122,14 +128,14 @@ def build_parser() -> argparse.ArgumentParser:
     realtime.add_argument(
         "--silence-ms",
         type=int,
-        default=600,
-        help="Silence that ends an utterance (default: 600).",
+        default=VADSettings.min_silence_ms,
+        help=f"Silence that ends an utterance (default: {VADSettings.min_silence_ms}).",
     )
     realtime.add_argument(
         "--max-utterance-ms",
         type=int,
-        default=12_000,
-        help="Hard cap on one utterance (default: 12000).",
+        default=VADSettings.max_utterance_ms,
+        help=f"Hard cap on one utterance (default: {VADSettings.max_utterance_ms}).",
     )
     realtime.add_argument(
         "--vad-threshold",
@@ -171,7 +177,7 @@ def settings_from_args(args: argparse.Namespace) -> Settings:
             compute_type=args.compute_type,
             beam_size=args.beam_size,
         ),
-        mt=MTSettings(model=args.mt_model, device=args.device),
+        mt=MTSettings(model=args.mt_model, device=args.device, backend=args.mt_backend),
         tts=TTSSettings(
             backend="none" if args.no_speak else args.tts,
             voice=args.tts_voice,

@@ -159,6 +159,44 @@ class TestUtteranceSegmenter:
         assert len(emitted) >= 2
         assert all(u.truncated for u in emitted)
 
+    def test_truncation_cuts_at_a_quiet_frame_not_mid_word(
+        self, audio_settings, vad_settings
+    ) -> None:
+        """Cutting exactly at the cap splits a word that Whisper then mishears."""
+        segmenter = UtteranceSegmenter(audio_settings, vad_settings)
+        # Speech with a short dip (a gap between words) 0.3 s before the cap.
+        cap = vad_settings.max_utterance_ms / 1000
+        speech = speech_like(cap + 2.0)
+        gap_at = int((cap - 0.3) * audio_settings.sample_rate)
+        speech[gap_at : gap_at + audio_settings.block_frames] = 0.0
+        emitted = self._feed(segmenter, speech, audio_settings.block_frames)
+        assert emitted[0].truncated
+        assert emitted[0].duration == pytest.approx(cap - 0.3 + 0.03, abs=0.04)
+
+    def test_audio_after_the_cut_starts_the_next_utterance(
+        self, audio_settings, vad_settings
+    ) -> None:
+        segmenter = UtteranceSegmenter(audio_settings, vad_settings)
+        cap = vad_settings.max_utterance_ms / 1000
+        speech = speech_like(cap + 1.0)
+        gap_at = int((cap - 0.3) * audio_settings.sample_rate)
+        speech[gap_at : gap_at + audio_settings.block_frames] = 0.0
+        emitted = self._feed(segmenter, speech, audio_settings.block_frames)
+        emitted += list(segmenter.flush())
+        total = sum(u.duration for u in emitted)
+        # Nothing between the cut and the cap was thrown away.
+        assert total == pytest.approx(cap + 1.0, abs=0.1)
+
+    def test_current_audio_exposes_the_utterance_in_progress(
+        self, audio_settings, vad_settings
+    ) -> None:
+        segmenter = UtteranceSegmenter(audio_settings, vad_settings)
+        assert segmenter.current_audio() is None
+        self._feed(segmenter, tone(1.0), audio_settings.block_frames)
+        audio = segmenter.current_audio()
+        assert audio is not None
+        assert len(audio) / audio_settings.sample_rate == pytest.approx(1.0, abs=0.15)
+
     def test_empty_frames_are_ignored(self, audio_settings, vad_settings) -> None:
         segmenter = UtteranceSegmenter(audio_settings, vad_settings)
         assert list(segmenter.push(np.zeros(0, dtype=np.float32))) == []

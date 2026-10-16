@@ -95,7 +95,7 @@ _LANGUAGE_NAMES: dict[str, str] = {
     "mya_Mymr": "Burmese", "nld_Latn": "Dutch", "nno_Latn": "Norwegian Nynorsk",
     "nob_Latn": "Norwegian Bokmal", "npi_Deva": "Nepali", "oci_Latn": "Occitan",
     "pan_Guru": "Punjabi", "pbt_Arab": "Pashto", "pes_Arab": "Persian",
-    "plt_Latn": "Malagasy", "pol_Latn": "Polish", "por_Latn": "Portuguese",
+    "plt_Latn": "Malagasy", "pol_Latn": "Polish", "por_Latn": "Portuguese (Brazil)",
     "ron_Latn": "Romanian", "rus_Cyrl": "Russian", "san_Deva": "Sanskrit",
     "sin_Sinh": "Sinhala", "slk_Latn": "Slovak", "slv_Latn": "Slovenian",
     "sna_Latn": "Shona", "snd_Arab": "Sindhi", "som_Latn": "Somali",
@@ -112,6 +112,9 @@ _LANGUAGE_NAMES: dict[str, str] = {
 _NAME_TO_FLORES: dict[str, str] = {
     name.lower(): code for code, name in _LANGUAGE_NAMES.items()
 }
+# NLLB's Portuguese follows the Brazilian FLORES-200 references and the Piper
+# voice is pt_BR, so the label says so; plain names still resolve.
+_NAME_TO_FLORES.update({"portuguese": "por_Latn", "português": "por_Latn", "portugues": "por_Latn"})
 
 # Default Piper voice per FLORES code. Generated from the official
 # ``rhasspy/piper-voices`` catalogue, preferring `medium` quality because
@@ -201,8 +204,8 @@ def resolve_language(code: str, *, allow_auto: bool = False) -> str:
         return raw
 
     lowered = raw.lower()
-    # ISO 639-1, optionally with a region suffix we can discard (es_ES -> es).
-    base = lowered.split("_", 1)[0]
+    # ISO 639-1, optionally with a region suffix we can discard (es_ES, pt-BR).
+    base = lowered.replace("-", "_").split("_", 1)[0]
     if lowered in _WHISPER_TO_FLORES:
         return _WHISPER_TO_FLORES[lowered]
     if base in _WHISPER_TO_FLORES:

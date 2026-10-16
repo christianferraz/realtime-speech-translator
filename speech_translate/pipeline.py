@@ -22,7 +22,7 @@ import numpy as np
 from .asr import FasterWhisperASR, SpeechRecognizer, Transcript
 from .config import Settings
 from .languages import AUTO, language_name
-from .mt import NLLBTranslator, Translator
+from .mt import Translator, create_translator
 from .segmentation import SentenceBuffer
 from .tts import SpeechAudio, TTSBackend, TTSUnavailableError, create_tts_backend
 
@@ -115,7 +115,7 @@ class Pipeline:
     @property
     def translator(self) -> Translator:
         if self._translator is None:
-            self._translator = NLLBTranslator(self.settings.mt)
+            self._translator = create_translator(self.settings.mt)
         return self._translator
 
     @property

@@ -266,7 +266,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repeats", type=int, default=5, help="Timed runs (default: 5).")
     parser.add_argument("--asr-model", default="base", help="faster-whisper model.")
     parser.add_argument(
-        "--mt-model", default="facebook/nllb-200-distilled-600M", help="Translation model."
+        "--mt-model", default=MTSettings.model, help="Translation model."
     )
     parser.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
     parser.add_argument("--compute-type", default="auto", help="CTranslate2 compute type.")

@@ -6,7 +6,7 @@ A modular cascade of open-source models:
 Stage   Model                                       Why
 ======  ==========================================  ===============================
 ASR     faster-whisper (CTranslate2)                Whisper accuracy, far less compute
-MT      NLLB-200 distilled 600M                     200 languages, actively maintained
+MT      NLLB-200 distilled 1.3B                     200 languages, actively maintained
 TTS     Piper (ONNX VITS)                           Faster than real time on CPU
 ======  ==========================================  ===============================
 
