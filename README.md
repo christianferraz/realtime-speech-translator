@@ -14,9 +14,14 @@ em outro idioma com legenda e voz traduzidas quase em tempo real.
 
 ## O que este fork acrescenta
 
-- **Legenda ao vivo enquanto a pessoa fala.** Uma tradução provisória (em itálico)
-  acompanha a fala e é corrigida a cada ~0,6 s. A versão final, com voz, chega quando a
-  frase termina.
+- **Legenda ao vivo enquanto a pessoa fala.** Uma legenda provisória (em itálico)
+  acompanha a fala: o texto original atualiza a cada ~0,6 s e a tradução, a cada ~1,2 s.
+  A versão final, com voz, chega quando o trecho termina.
+- **Tradução por trechos, como um intérprete.** Frases longas são traduzidas e faladas
+  em partes, quebradas nas vírgulas (com pelo menos ~5 palavras cada), em vez de esperar
+  a frase inteira acabar.
+- **Voz que acelera quando atrasa.** A voz fala a 1,15× e vai até 1,6× quando está
+  atrasada em relação ao vídeo.
 - **Traduzir outra aba do navegador.** Um vídeo do YouTube, uma aula ou uma chamada, em
   vez do microfone (Chrome e Edge).
 - **Volume do original ajustável.** A aba original é silenciada e tocada de novo pelo
@@ -28,7 +33,8 @@ em outro idioma com legenda e voz traduzidas quase em tempo real.
 - **Reconhecimento na GPU do Mac.** Em Apple Silicon, o Whisper roda na GPU via
   [MLX](https://github.com/ml-explore/mlx), automaticamente.
 - **A captura nunca espera a tradução.** O processamento roda numa thread separada, então
-  o atraso não se acumula com o tempo.
+  ouvir o áudio nunca trava. Se o vídeo pausar no meio de uma frase, ela é finalizada
+  depois de 1 s.
 
 ## Requisitos
 
@@ -129,6 +135,16 @@ Medido num Apple M4 Max.
 | Frase final depois da pausa | ~1,4 s (estimado: 0,6 s de pausa + 0,8 s de processamento) | ~0,34 s (medido) |
 | Captura durante a tradução | travava e o atraso acumulava | não trava |
 
+**Monólogo sem pausas**, 27 s de fala contínua em inglês traduzidos para português, numa
+aba do navegador:
+
+| | Antes dos ajustes | Agora |
+|---|---:|---:|
+| Atraso da voz quando o vídeo termina | 12,6 s | 7,5 s |
+| Duração de cada trecho de voz | até 10,7 s | 1,3–4,8 s |
+| Última frase | ficava presa, nunca falada | falada |
+| CPU média | ~350% | ~180–200% |
+
 **Reconhecimento (Whisper)**, ao vivo, por chamada:
 
 | Configuração | Tempo | Fim da última frase | Legendas |
@@ -160,7 +176,7 @@ Para reproduzir: `speech-translate-bench --audio sample.wav --src pt --tgt en`.
 ```bash
 source .venv/bin/activate
 pip install -e ".[dev,audio,tts,web]"
-pytest -q                            # 216 testes, modelos falsos, sem downloads
+pytest -q                            # 230 testes, modelos falsos, sem downloads
 ```
 
 Onde está cada coisa:
@@ -178,9 +194,12 @@ Onde está cada coisa:
 - **As legendas provisórias mudam enquanto a pessoa fala.** O modelo só entende a frase
   com mais contexto. A versão final é a que vale.
 - **Não é simultânea palavra por palavra.** Como a ordem das palavras muda entre idiomas,
-  a tradução final de cada frase só sai quando ela termina (~0,34 s depois), e as
-  legendas provisórias ficam cerca de 1 s atrás da fala, como acontece com um intérprete
-  humano.
+  cada trecho só é traduzido quando termina (~0,34 s depois), e as legendas provisórias
+  ficam cerca de 1 s atrás da fala, como acontece com um intérprete humano.
+- **A voz atrasa em quem fala sem parar.** A fala em português costuma ser mais longa que
+  o original. Num monólogo sem pausas, a voz pode ficar alguns segundos atrás (7,5 s ao
+  fim de 27 s de fala contínua) e alcança o vídeo nas pausas. Se isso incomodar, use
+  **"Subtitles only"**.
 - **Termos técnicos.** O NLLB traduz jargão ao pé da letra: "string" vira "cadeia" e
   "borrow" vira "empréstimo".
 - **Música e ruído de fundo** podem ser tratados como fala.

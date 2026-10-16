@@ -121,9 +121,11 @@ class SystemTTS(TTSBackend):
         self._engine = True
         return self
 
-    def _configure(self, engine) -> None:  # noqa: ANN001
+    def _configure(self, engine, speed: float = 1.0) -> None:  # noqa: ANN001
         try:
-            engine.setProperty("rate", int(175 / max(self.settings.length_scale, 0.1)))
+            engine.setProperty(
+                "rate", int(175 * speed / max(self.settings.length_scale, 0.1))
+            )
         except Exception:
             logger.debug("Could not set the speech rate", exc_info=True)
         self._select_voice(engine)
@@ -169,7 +171,7 @@ class SystemTTS(TTSBackend):
             self.target_language,
         )
 
-    def _synthesize_to_array(self, text: str) -> tuple[np.ndarray, int]:
+    def _synthesize_to_array(self, text: str, speed: float = 1.0) -> tuple[np.ndarray, int]:
         from ..audio.wav import read_wav
 
         def work() -> tuple[np.ndarray, int]:
@@ -181,7 +183,7 @@ class SystemTTS(TTSBackend):
             # to avoid.
             engine = pyttsx3.init()
             try:
-                self._configure(engine)
+                self._configure(engine, speed)
                 with tempfile.TemporaryDirectory() as tmp:
                     out = Path(tmp) / "speech.wav"
                     engine.save_to_file(text, str(out))
@@ -197,12 +199,12 @@ class SystemTTS(TTSBackend):
 
         return _with_timeout(work, self.timeout, "synthesis")
 
-    def synthesize(self, text: str) -> SpeechAudio:
+    def synthesize(self, text: str, speed: float = 1.0) -> SpeechAudio:
         text = (text or "").strip()
         if not text:
             return SpeechAudio(np.zeros(0, dtype=np.float32), self._sample_rate, self.voice)
         self.load()
-        audio, rate = self._synthesize_to_array(text)
+        audio, rate = self._synthesize_to_array(text, speed)
         self._sample_rate = rate
         return SpeechAudio(audio=audio, sample_rate=rate, voice=self.voice)
 

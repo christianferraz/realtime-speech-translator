@@ -109,3 +109,43 @@ def test_empty_and_whitespace_input_is_ignored() -> None:
     assert buffer.add("   ") == []
     assert buffer.add(None) == []  # type: ignore[arg-type]
     assert buffer.pending == ""
+
+
+class TestClauses:
+    """Long sentences are voiced clause by clause, like an interpreter would."""
+
+    def test_long_sentence_splits_at_commas(self) -> None:
+        from speech_translate.segmentation import split_clauses
+
+        text = "If you have any questions, leave them in the comments, and I will try to answer."
+        assert split_clauses(text, min_words=5) == [
+            "If you have any questions,",
+            "leave them in the comments,",
+            "and I will try to answer.",
+        ]
+
+    def test_short_pieces_are_merged(self) -> None:
+        from speech_translate.segmentation import split_clauses
+
+        assert split_clauses("Yes, I know.", min_words=5) == ["Yes, I know."]
+        assert split_clauses("So, today we will look at the borrow checker.", min_words=5) == [
+            "So, today we will look at the borrow checker."
+        ]
+
+    def test_numbers_and_times_are_not_split(self) -> None:
+        from speech_translate.segmentation import split_clauses
+
+        text = "It costs 1,5 euros and the talk starts at 3:30 in the main hall."
+        assert split_clauses(text, min_words=3) == [text]
+
+    def test_zero_disables_splitting(self) -> None:
+        from speech_translate.segmentation import split_clauses
+
+        text = "If you have any questions, leave them in the comments."
+        assert split_clauses(text, min_words=0) == [text]
+
+    def test_take_clauses_keeps_the_unfinished_tail(self) -> None:
+        buffer = SentenceBuffer()
+        buffer.add("which a lot of people find confusing at first, is actually your")
+        assert buffer.take_clauses(min_words=5) == ["which a lot of people find confusing at first,"]
+        assert buffer.pending == "is actually your"

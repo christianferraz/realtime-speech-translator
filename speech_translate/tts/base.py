@@ -59,8 +59,12 @@ class TTSBackend(abc.ABC):
         return ""
 
     @abc.abstractmethod
-    def synthesize(self, text: str) -> SpeechAudio:
-        """Render ``text`` to audio. Empty text yields empty audio."""
+    def synthesize(self, text: str, speed: float = 1.0) -> SpeechAudio:
+        """Render ``text`` to audio. Empty text yields empty audio.
+
+        ``speed`` multiplies the configured speaking rate for this call only;
+        live translation raises it to catch up when speech falls behind.
+        """
 
     def load(self) -> TTSBackend:
         """Eagerly initialise. Default is a no-op for lazy backends."""
@@ -97,5 +101,5 @@ class NullTTS(TTSBackend):
     def voice(self) -> str:
         return "none (subtitles only)"
 
-    def synthesize(self, text: str) -> SpeechAudio:
+    def synthesize(self, text: str, speed: float = 1.0) -> SpeechAudio:
         return SpeechAudio(audio=np.zeros(0, dtype=np.float32), sample_rate=self._sample_rate)

@@ -45,6 +45,7 @@ class FakeTTS(TTSBackend):
     def __init__(self, sample_rate: int = 22_050) -> None:
         self._sample_rate = sample_rate
         self.calls: list[str] = []
+        self.speeds: list[float] = []
 
     @property
     def sample_rate(self) -> int:
@@ -54,8 +55,9 @@ class FakeTTS(TTSBackend):
     def voice(self) -> str:
         return "fake-voice"
 
-    def synthesize(self, text: str) -> SpeechAudio:
+    def synthesize(self, text: str, speed: float = 1.0) -> SpeechAudio:
         self.calls.append(text)
+        self.speeds.append(speed)
         samples = np.zeros(self._sample_rate // 10, dtype=np.float32)
         return SpeechAudio(audio=samples, sample_rate=self._sample_rate, voice=self.voice)
 

@@ -15,14 +15,48 @@ import re
 import time
 from dataclasses import dataclass, field
 
-__all__ = ["SentenceBuffer"]
+__all__ = ["SentenceBuffer", "split_clauses"]
 
 # Sentence-final punctuation across the scripts we support: Latin, CJK
 # (。！？), Arabic (؟ ،), Devanagari (।), Greek question mark (;).
 _SENTENCE_END = re.compile(r"[.!?。！？।؟;]+[\"')\]}»”’]*\s*")
+# Clause boundaries: a comma, semicolon, colon or dash followed by a space, so
+# "1,5" and "3:30" are left alone.
+_CLAUSE_END = re.compile(r"[,;:\u2013\u2014]\s+")
 _ABBREVIATIONS = frozenset(
     {"mr.", "mrs.", "ms.", "dr.", "prof.", "sr.", "jr.", "st.", "vs.", "etc.", "e.g.", "i.e."}
 )
+
+
+def split_clauses(text: str, min_words: int = 5) -> list[str]:
+    """Split ``text`` at clause boundaries into pieces of at least ``min_words``.
+
+    A live interpreter does not wait for a 25-word sentence to end before
+    speaking: it goes clause by clause. Translating and voicing each clause
+    as soon as it is complete cuts the delay behind a long sentence from its
+    whole length to the length of one clause. Pieces shorter than
+    ``min_words`` are merged with their neighbour, because NLLB translates a
+    two-word fragment badly and the voice stutters through it.
+    """
+    text = (text or "").strip()
+    if min_words <= 0 or not text:
+        return [text] if text else []
+    pieces: list[str] = []
+    current = ""
+    position = 0
+    for match in _CLAUSE_END.finditer(text):
+        current += text[position : match.end()]
+        position = match.end()
+        if len(current.split()) >= min_words:
+            pieces.append(current.strip())
+            current = ""
+    rest = (current + text[position:]).strip()
+    if rest:
+        if pieces and len(rest.split()) < min_words:
+            pieces[-1] = f"{pieces[-1]} {rest}"
+        else:
+            pieces.append(rest)
+    return pieces
 
 
 @dataclass
@@ -102,6 +136,23 @@ class SentenceBuffer:
         self._pending = ""
         self._first_added_at = None
         return [text] if text else []
+
+    def take_clauses(self, min_words: int = 5) -> list[str]:
+        """Release the complete clauses of the pending text, keeping the last.
+
+        The last piece may still be mid-clause, so it stays pending until the
+        next fragment arrives or the sentence ends.
+        """
+        boundaries = list(_CLAUSE_END.finditer(self._pending))
+        if not boundaries:
+            return []
+        cut = boundaries[-1].end()
+        head, tail = self._pending[:cut], self._pending[cut:]
+        if len(head.split()) < min_words:
+            return []
+        self._pending = tail.strip()
+        self._first_added_at = time.monotonic() if self._pending else None
+        return split_clauses(head, min_words)
 
     def flush_if_expired(self, now: float | None = None) -> list[str]:
         return self.flush() if self.expired(now) else []

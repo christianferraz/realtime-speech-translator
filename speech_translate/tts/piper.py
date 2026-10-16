@@ -171,13 +171,13 @@ class PiperTTS(TTSBackend):
         return self
 
     # -- synthesis -------------------------------------------------------
-    def synthesize(self, text: str) -> SpeechAudio:
+    def synthesize(self, text: str, speed: float = 1.0) -> SpeechAudio:
         text = (text or "").strip()
         if not text:
             return SpeechAudio(np.zeros(0, dtype=np.float32), self._sample_rate, self.voice)
         self.load()
 
-        syn_config = self._synthesis_config()
+        syn_config = self._synthesis_config(speed)
         buffer = io.BytesIO()
         with wave.open(buffer, "wb") as wav_file:
             self._voice.synthesize_wav(text, wav_file, syn_config=syn_config)
@@ -189,10 +189,11 @@ class PiperTTS(TTSBackend):
         self._sample_rate = rate
         return SpeechAudio(audio=audio, sample_rate=rate, voice=self.voice)
 
-    def _synthesis_config(self):
+    def _synthesis_config(self, speed: float = 1.0):
         try:
             from piper import SynthesisConfig
 
-            return SynthesisConfig(length_scale=self.settings.length_scale)
+            # length_scale is a duration multiplier: smaller is faster.
+            return SynthesisConfig(length_scale=self.settings.length_scale / max(speed, 0.1))
         except Exception:
             return None

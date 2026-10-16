@@ -25,6 +25,7 @@ import tempfile
 import threading
 import time
 import uuid
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -202,6 +203,12 @@ def launch_demo(demo, **kwargs):  # noqa: ANN001, ANN201
     kwargs.setdefault("head", _TAB_CAPTURE_JS)
     # Hide the "Use via API" footer link.
     kwargs.setdefault("footer_links", ["gradio", "settings"])
+    # Gradio builds a status-code table on every queued event and touches a
+    # name Starlette has deprecated. Live mode queues several events a second,
+    # so the warning would bury every real message in the terminal.
+    warnings.filterwarnings(
+        "ignore", message=".*HTTP_422_UNPROCESSABLE_ENTITY.*", module="gradio"
+    )
     return demo.launch(**kwargs)
 
 
@@ -441,7 +448,9 @@ def build_demo(settings: Settings | None = None, preload: bool = False):
         )
         speech = gr.skip()
         if update.speech is not None:
-            speech = (update.speech.sample_rate, update.speech.audio)
+            # int16 up front: Gradio would convert anyway, warning every time.
+            pcm = np.clip(update.speech.audio, -1.0, 1.0) * 32767
+            speech = (update.speech.sample_rate, pcm.astype(np.int16))
         return rendered, history, speech
 
     def end_session(key):  # noqa: ANN001

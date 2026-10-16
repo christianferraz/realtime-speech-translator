@@ -199,7 +199,7 @@ class Pipeline:
 
         return result
 
-    def synthesize(self, text: str) -> SpeechAudio | None:
+    def synthesize(self, text: str, speed: float = 1.0) -> SpeechAudio | None:
         """Synthesise, degrading to subtitles-only if the backend fails.
 
         A speech engine that dies mid-session must not take translation with
@@ -209,7 +209,7 @@ class Pipeline:
         from .tts.base import NullTTS
 
         try:
-            return self.tts.synthesize(text)
+            return self.tts.synthesize(text, speed=speed)
         except TTSUnavailableError as exc:
             logger.warning(
                 "Speech synthesis failed (%s); continuing in subtitles-only mode.", exc

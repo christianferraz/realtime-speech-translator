@@ -56,12 +56,14 @@ class VADSettings:
     #: Ignore blips shorter than this; they are keyboard clicks, not speech.
     min_speech_ms: int = 250
     #: Silence this long ends the utterance. Every millisecond here is added
-    #: to the latency of every sentence, so it is as short as it can be
-    #: without splitting on the gap between two words.
-    min_silence_ms: int = 400
+    #: to the latency of every sentence; 300 ms also ends utterances at most
+    #: comma pauses, which live translation then voices clause by clause.
+    min_silence_ms: int = 300
     #: Hard cap so a monologue still produces output. The cut is moved to the
     #: quietest nearby frame so it does not land in the middle of a word.
-    max_utterance_ms: int = 6_000
+    #: On a 27 s monologue, 4 s took the voice from 7.8 s to 6.8 s behind;
+    #: at 3 s Whisper started mishearing the short pieces.
+    max_utterance_ms: int = 4_000
     #: Audio kept from *before* the trigger so we don't clip the first phoneme.
     pre_roll_ms: int = 300
 

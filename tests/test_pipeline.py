@@ -149,7 +149,7 @@ class TestLazyConstruction:
 
     def test_warmup_survives_a_failing_component(self) -> None:
         class ExplodingTTS(FakeTTS):
-            def synthesize(self, text: str):  # noqa: ANN201
+            def synthesize(self, text: str, speed: float = 1.0):  # noqa: ANN201
                 raise RuntimeError("no voice")
 
         pipeline, _, _, _ = make_pipeline(tts=ExplodingTTS())
@@ -179,7 +179,7 @@ class TestSynthesisFailureDegradesGracefully:
             super().__init__()
             self.attempts = 0
 
-        def synthesize(self, text: str):  # noqa: ANN201
+        def synthesize(self, text: str, speed: float = 1.0):  # noqa: ANN201
             self.attempts += 1
             raise TTSUnavailableError("no audio device")
 
@@ -201,7 +201,7 @@ class TestSynthesisFailureDegradesGracefully:
 
     def test_unexpected_exceptions_are_also_contained(self) -> None:
         class WeirdTTS(FakeTTS):
-            def synthesize(self, text: str):  # noqa: ANN201
+            def synthesize(self, text: str, speed: float = 1.0):  # noqa: ANN201
                 raise ValueError("something odd")
 
         pipeline, _, _, _ = make_pipeline(tts=WeirdTTS())

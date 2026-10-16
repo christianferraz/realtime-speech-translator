@@ -189,3 +189,90 @@ def test_same_language_is_not_translated() -> None:
         update = poll_until(live, lambda u: u.finals)
     assert update.finals[0].translation == "Hello there."
     assert translator.calls == []
+
+
+class TestCatchUp:
+    """Translated speech is longer than the original; the voice must not drift."""
+
+    def clip(self, seconds: float) -> SpeechAudio:
+        return SpeechAudio(audio=np.zeros(int(22_050 * seconds), dtype=np.float32), sample_rate=22_050)
+
+    def test_base_speed_when_nothing_is_queued(self) -> None:
+        live = make_live(base_speed=1.15)[0]
+        assert live._catch_up_speed() == pytest.approx(1.15)
+
+    def test_speeds_up_with_the_backlog(self) -> None:
+        live = make_live(base_speed=1.0, max_speed=1.5, catch_up_seconds=4.0)[0]
+        live._clips = [self.clip(2.0)]
+        assert live._catch_up_speed() == pytest.approx(1.25)
+
+    def test_speed_is_capped(self) -> None:
+        live = make_live(base_speed=1.0, max_speed=1.5, catch_up_seconds=4.0)[0]
+        live._clips = [self.clip(10.0)]
+        assert live._catch_up_speed() == pytest.approx(1.5)
+
+    def test_speech_still_playing_counts_as_backlog(self) -> None:
+        clock = FakeClock()
+        live = make_live(clock=clock, base_speed=1.0, max_speed=1.5, catch_up_seconds=4.0)[0]
+        live._playing_until = clock.now + 4.0
+        assert live._catch_up_speed() == pytest.approx(1.5)
+
+    def test_synthesis_receives_the_speed(self) -> None:
+        live, _, _, tts = make_live(partials=False)
+        with live:
+            live.feed(np.concatenate([tone(1.0), quiet(0.6)]))
+            poll_until(live, lambda u: u.finals)
+        assert tts.speeds == [pytest.approx(live.base_speed)]
+
+
+def test_utterance_is_finalised_when_audio_stops_arriving() -> None:
+    """A paused video sends no silence, so the last sentence would hang."""
+    clock = FakeClock()
+    live = make_live(clock=clock, partials=False, stall_timeout=1.0)[0]
+    with live:
+        live.feed(tone(1.0))  # mid-utterance, then nothing more arrives
+        time.sleep(0.2)
+        assert live.poll().finals == []
+        clock.now += 1.5
+        update = poll_until(live, lambda u: u.finals)
+    assert update.finals[0].translation == "Hola."
+
+
+class TestPartialCost:
+    """Captions must not starve the sentences that get spoken."""
+
+    def test_unchanged_caption_is_not_retranslated(self) -> None:
+        live, _, translator, _ = make_live(
+            partial_interval=0.0, partial_translate_interval=0.0, min_partial_audio=0.5
+        )
+        with live:
+            live.feed(tone(1.0))
+            poll_until(live, lambda u: u.partial_translation)
+            time.sleep(0.3)  # many idle passes over the same audio
+            calls = len(translator.calls)
+        assert calls == 1
+
+    def test_translation_is_throttled_but_source_text_updates(self) -> None:
+        live, recognizer, translator, _ = make_live(
+            partial_interval=0.0, partial_translate_interval=60.0, min_partial_audio=0.5
+        )
+        with live:
+            live.feed(tone(1.0))
+            poll_until(live, lambda u: u.partial_translation == "Hola.")
+            recognizer.text = "Hello there, friend"
+            update = poll_until(live, lambda u: u.partial_transcript == "Hello there, friend")
+            assert update.partial_translation == "Hola."  # kept, not re-translated yet
+            assert len(translator.calls) == 1
+
+
+def test_long_sentences_are_translated_clause_by_clause() -> None:
+    text = "If you have any questions, leave them in the comments, and I will answer them all."
+    live, _, translator, _ = make_live(text=text, partials=False, clause_min_words=5)
+    with live:
+        live.feed(np.concatenate([tone(1.0), quiet(0.6)]))
+        poll_until(live, lambda u: len(u.finals) == 3)
+    assert [call[0] for call in translator.calls] == [
+        "If you have any questions,",
+        "leave them in the comments,",
+        "and I will answer them all.",
+    ]
