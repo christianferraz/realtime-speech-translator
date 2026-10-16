@@ -532,7 +532,7 @@ def build_demo(settings: Settings | None = None, preload: bool = False):
         gr.Markdown(
             "---\n"
             f"Models: `faster-whisper {settings.asr.model}` · `{settings.mt.model}` · `Piper`  \n"
-            "[Source on GitHub](https://github.com/gebrilfradj/realtime-speech-translator)"
+            "[Source on GitHub](https://github.com/christianferraz/realtime-speech-translator)"
         )
 
         translate_button.click(

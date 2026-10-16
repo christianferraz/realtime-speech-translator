@@ -43,7 +43,7 @@ subtitles rather than failing.
 
 ## Source
 
-[github.com/gebrilfradj/realtime-speech-translator](https://github.com/gebrilfradj/realtime-speech-translator)
+[github.com/christianferraz/realtime-speech-translator](https://github.com/christianferraz/realtime-speech-translator)
 
 The repo has the full latency breakdown, a benchmark against the original
 openai-whisper and M2M100 stack, a Dockerfile, and 188 tests.

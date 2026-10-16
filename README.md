@@ -1,164 +1,166 @@
 # Real-Time Speech Translator
 
-Speech-to-speech translation that runs on your own machine. You talk, it transcribes,
-translates, and speaks the result back in another language. No cloud APIs.
+Tradução de fala para fala, rodando no seu próprio computador. Ele ouve o microfone,
+ou o áudio de outra aba do navegador, transcreve, traduz e fala o resultado em outro
+idioma. Tudo local, sem API na nuvem.
 
-I built this for an undergraduate research project at the University of Florida, then
-rewrote it to be faster and to actually install correctly.
+Este é o fork de [Christian Pacheco](https://github.com/christianferraz), baseado no
+[projeto original de Gebril Fradj](https://github.com/gebrilfradj/realtime-speech-translator).
+O foco aqui é usar no dia a dia em **português do Brasil**: assistir vídeos e conversas
+em outro idioma com legenda e voz traduzidas quase em tempo real.
 
-[![CI](https://github.com/gebrilfradj/realtime-speech-translator/actions/workflows/ci.yml/badge.svg)](https://github.com/gebrilfradj/realtime-speech-translator/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-**2.7 s to process 4.5 s of speech on a CPU with no GPU, speech synthesis included.
-That is a real-time factor of 0.61, so it keeps up with a live speaker.**
+## O que este fork acrescenta
 
-![Translating English speech into Spanish in the browser](assets/demo.gif)
+- **Legenda ao vivo enquanto a pessoa fala.** Uma tradução provisória (em itálico)
+  acompanha a fala e é corrigida a cada ~0,6 s. A versão final, com voz, chega quando a
+  frase termina.
+- **Traduzir outra aba do navegador.** Um vídeo do YouTube, uma aula ou uma chamada, em
+  vez do microfone (Chrome e Edge).
+- **Volume do original ajustável.** A aba original é silenciada e tocada de novo pelo
+  tradutor no volume que você escolher, e abaixa sozinha enquanto a tradução fala.
+- **Português do Brasil.** O idioma aparece como "Portuguese (Brazil)". `--tgt pt-BR`,
+  `pt`, `português` e `portuguese` funcionam.
+- **Tradução melhor e mais rápida.** NLLB-200 1.3B como padrão, rodando em CTranslate2
+  int8, e cada frase traduzida separadamente.
+- **A captura nunca espera a tradução.** O processamento roda numa thread separada, então
+  o atraso não se acumula com o tempo.
 
-## Quickstart
+## Começando (macOS)
 
 ```bash
-git clone https://github.com/gebrilfradj/realtime-speech-translator.git
+git clone https://github.com/christianferraz/realtime-speech-translator.git
 cd realtime-speech-translator
 
-python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+python3 -m venv .venv               # testado com o Python 3.14 do Homebrew
+source .venv/bin/activate
 pip install -r requirements.txt
-
-python -m speech_translate.webui    # browser demo on http://127.0.0.1:7860
+pip install -e .                    # instala os comandos speech-translate*
 ```
 
-Models download on first run (about 1.5 GB) and are cached after that.
-
-Docker works too:
+Para rodar, direto no terminal:
 
 ```bash
-docker build -t speech-translate .
-docker run --rm -p 7860:7860 -v st-cache:/home/app/.cache speech-translate
+speech-translate-web --preload --tgt pt-BR   # interface no navegador
+speech-translate --tgt pt-BR                 # só terminal: microfone -> português
 ```
 
-## What it uses
+Abra http://127.0.0.1:7860 para a interface. Em um terminal novo, rode antes
+`source .venv/bin/activate` dentro da pasta do projeto, ou chame o comando pelo caminho
+completo, sem ativar nada: `.venv/bin/speech-translate-web --preload --tgt pt-BR`.
 
-| Stage | Model | Why |
+Na primeira execução os modelos são baixados: ~11 GB, quase tudo do tradutor 1.3B, que
+vem em dois formatos. O tradutor também é convertido para CTranslate2 uma única vez
+(~1,5 min, mais 2,6 GB). No total são ~14 GB em disco, em `~/.cache/huggingface` e
+`~/.cache/speech_translate`. Depois disso, o
+servidor sobe em ~6 s.
+
+## Traduzindo uma aba do navegador
+
+1. Abra a aba **Live**.
+2. Marque **"Listen to another browser tab instead of the microphone"**.
+3. Ajuste **"Original tab volume (%)"**. Com 0 você ouve só a tradução; com 20 (o
+   padrão), o original fica baixo, mas audível.
+4. Clique em **Gravar**, escolha a aba do vídeo e deixe **"Compartilhar áudio da guia"**
+   ligado.
+5. Dê play no vídeo.
+
+Para usar o microfone, deixe a caixa desmarcada. Se a voz traduzida incomodar, marque
+**"Subtitles only"** para ver só as legendas.
+
+## Linha de comando
+
+Com o ambiente ativado (`source .venv/bin/activate`):
+
+```bash
+speech-translate --tgt pt-BR                  # microfone -> português, falado e legendado
+speech-translate --src en --tgt pt-BR         # fixa o idioma de origem, um pouco mais rápido
+speech-translate --tgt pt-BR --no-speak       # só legendas
+speech-translate --file aula.wav --tgt pt-BR  # traduz uma gravação
+speech-translate --list-devices               # escolhe o microfone (--input-device N)
+speech-translate --list-languages             # códigos de idioma
+speech-translate --help                       # todas as opções
+```
+
+Pare com `Ctrl+C`; o terminal mostra a latência média da sessão.
+
+Para um computador mais fraco, troque o tradutor pelo modelo menor:
+`--mt-model facebook/nllb-200-distilled-600M`.
+
+As legendas provisórias existem só na interface web. A linha de comando traduz frase a
+frase.
+
+## Modelos
+
+| Etapa | Modelo | Observação |
 |---|---|---|
-| Speech recognition | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) | Whisper accuracy, int8 on CPU, and it can load distilled checkpoints that `openai-whisper` can't |
-| Translation | [nllb-200-distilled-1.3B](https://huggingface.co/facebook/nllb-200-distilled-1.3B) (600M on the Space) | 200 languages, still maintained, better than M2M100-418M; runs on CTranslate2 int8 |
-| Speech synthesis | [Piper](https://github.com/OHF-Voice/piper1-gpl) | Faster than real time on CPU, 170 voices across 49 languages |
+| Reconhecimento de fala | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) `base` | int8 em CPU, 8 threads |
+| Tradução | [NLLB-200 distilled 1.3B](https://huggingface.co/facebook/nllb-200-distilled-1.3B) | CTranslate2 int8; 600M no Hugging Face Space |
+| Voz | [Piper](https://github.com/OHF-Voice/piper1-gpl) | voz brasileira `pt_BR-cadu-medium` |
 
-97 source languages, 200 translation targets, 48 of those with a voice. Each stage sits
-behind a small interface, so swapping a model is one class rather than a rewrite.
+98 idiomas disponíveis, 48 deles com voz. Os outros saem só como legenda.
 
-## Usage
+## Desempenho
 
-```bash
-python -m speech_translate --tgt es               # auto-detect what you speak, reply in Spanish
-python -m speech_translate --src en --tgt ja      # pin the source language, slightly faster
-python -m speech_translate --tgt fr --no-speak    # subtitles only
-python -m speech_translate --tgt de --asr-model small   # more accuracy, more latency
+Medido num Apple M4 Max, só CPU.
 
-python -m speech_translate --file talk.wav --tgt de     # translate a recording
-python -m speech_translate --list-devices               # pick a microphone
-python -m speech_translate --list-languages             # language codes
-```
+**Ao vivo**, com um áudio de 9,6 s em português tocado no ritmo real da fala:
 
-Language codes are flexible. `es`, `spa_Latn`, `es-ES` and `Spanish` all work, and an
-unknown code fails immediately with a suggestion instead of quietly mistranslating.
+| | Projeto original | Este fork |
+|---|---|---|
+| Primeiro texto na tela | só depois de uma pausa | ~2,2 s depois de começar a falar |
+| Frase final depois da pausa | ~1,4 s (estimado: 0,6 s de pausa + 0,8 s de processamento) | ~0,4 s (medido) |
+| Captura durante a tradução | travava e o atraso acumulava | não trava |
 
-As a library:
+**Tradução**, mediana por frase:
 
-```python
-from speech_translate import Pipeline, Settings
+| Modelo | Tempo | Exemplo: "Thank you for watching." |
+|---|---:|---|
+| NLLB 600M | ~210 ms | "Obrigado por me vigiar." |
+| **NLLB 1.3B (padrão)** | **~390 ms** | **"Obrigado por assistir."** |
 
-pipeline = Pipeline(Settings(src="auto", tgt="spa_Latn")).warmup()
-result = pipeline.process_file("sample.wav")
+O 1.3B é quase duas vezes mais lento, mas acerta frases feitas como essa e usa formas
+brasileiras ("você" no lugar de "tu").
 
-print(result.source_language_name)   # English, detected
-print(result.translation)            # Hola, ¿cómo estás hoy? ...
-result.speech.save("out.wav")
-```
+Para reproduzir: `speech-translate-bench --audio sample.wav --src pt --tgt en`.
 
-Importing the package doesn't load models or open audio devices.
-
-## Performance
-
-CPU-only machine, no GPU. Same 4.5 s clip, median of 5 runs after warm-up. Reproduce with
-`python -m speech_translate.benchmark --audio sample.wav --tgt es --legacy`.
-
-| Setup | ASR | MT | TTS | Total | RTF |
-|---|---:|---:|---:|---:|---:|
-| Original (`openai-whisper small` + M2M100-418M) | 3438 ms | 1235 ms | n/a | 4673 ms | 1.04 |
-| faster-whisper `small` + NLLB + Piper | 3209 ms | 1432 ms | 253 ms | 4894 ms | 1.09 |
-| **faster-whisper `base` + NLLB + Piper (default)** | **1119 ms** | **1365 ms** | **257 ms** | **2741 ms** | **0.61** |
-
-Worth being clear about where the speedup came from. Swapping the ASR runtime by itself
-only bought about 1.07x on this CPU, since CTranslate2's bigger wins need a GPU or
-AVX-512 VNNI, and NLLB-600M is roughly 18% slower than M2M100 (a deliberate trade for
-quality and language coverage). The real gain is that faster-whisper makes the smaller
-checkpoints practical, so the default drops to `base`:
-
-| ASR model | Latency | RTF |
-|---|---:|---:|
-| `tiny` | 600 ms | 0.13 |
-| **`base` (default)** | **1097 ms** | **0.24** |
-| `distil-small.en` | 1529 ms | 0.34 |
-| `small` | 3270 ms | 0.73 |
-
-## Notes from the rewrite
-
-The original version had a few problems worth naming, since they shaped the design:
-
-- `requirements.txt` listed `whisper`, which on PyPI is [Graphite's time-series
-  database](https://pypi.org/project/whisper/), not OpenAI's. It imports fine and then has
-  no `load_model()`, so CI passed while nothing worked. CI now fails if it reappears.
-- `--src auto` threw away the detected language and passed the string `"auto"` to the
-  translator as a language code.
-- Audio was cut into fixed 3-second chunks, which split words and ran the recognizer on
-  silence. Voice activity detection replaced it, so 5 s of silence now costs nothing.
-- Playback blocked the processing thread, so the translator stopped translating while it
-  was speaking.
-
-Full detail is in the commit history.
-
-## Development
+## Desenvolvimento
 
 ```bash
+source .venv/bin/activate
 pip install -e ".[dev,audio,tts,web]"
-pytest tests -q                       # 188 tests, models mocked, no downloads
-ruff check speech_translate tests
-python scripts/check_dependencies.py  # imports must match declared dependencies
+pytest -q                            # 205 testes, modelos falsos, sem downloads
 ```
 
-CI runs lint, the test suite on Linux and Windows across Python 3.10 to 3.12, a dependency
-audit, and a build.
+Onde está cada coisa:
 
-`assets/demo.gif` is generated by `scripts/record_demo.py`, which drives a real browser
-against a running server, so it stays in sync with the actual UI.
+- `speech_translate/live.py`: sessão ao vivo (legendas provisórias, fila de voz)
+- `speech_translate/webui.py`: interface Gradio, captura de aba e volume do original
+- `speech_translate/audio/vad.py`: detecção de fala e corte das frases
+- `speech_translate/mt.py`: tradução em CTranslate2, com volta automática para PyTorch
 
-## Hosted demo
+## Limitações
 
-Hugging Face Spaces needs a README with `sdk: gradio` front matter and its dependencies in
-`requirements.txt` at the Space root, neither of which matches this repo's layout. Those
-live in [`spaces/`](spaces/) and get put in place by:
+- **Captura de aba só no Chrome e no Edge.** Safari e Firefox não compartilham o áudio de
+  uma aba.
+- **As legendas provisórias mudam enquanto a pessoa fala.** O modelo só entende a frase
+  com mais contexto. A versão final é a que vale.
+- **Não é simultânea palavra por palavra.** Como a ordem das palavras muda entre idiomas,
+  sobra sempre ~1 s de atraso, como acontece com um intérprete humano.
+- **Termos técnicos.** O NLLB traduz jargão ao pé da letra: "string" vira "cadeia" e
+  "borrow" vira "empréstimo".
+- **Música e ruído de fundo** podem ser tratados como fala.
 
-```bash
-python scripts/deploy_space.py --push https://huggingface.co/spaces/<user>/<name>
-```
+## Créditos
 
-## Limitations
+O projeto original é de **Gebril Fradj**, que o criou como pesquisa de graduação na
+University of Florida:
 
-- Runs fine on CPU, which is what all the numbers above were measured on. A GPU
-  (`--device cuda`) helps recognition and translation a lot.
-- Translation quality is NLLB's, so low-resource languages are weaker.
-- 48 of the 200 target languages have a Piper voice. The rest fall back to the system voice
-  and then to subtitles, so a missing voice never crashes anything.
-- The `--legacy` benchmark leaves synthesis out of both sides, because Coqui TTS is
-  unmaintained and no longer installs on current Python. That is why it was replaced.
+> Fradj et al., *Real-time Multilingual Speech Translation with Open-Source Models*,
+> UF Journal of Undergraduate Research, Spring 2025.
 
-## Citation
+## Licença
 
-Fradj et al., *Real-time Multilingual Speech Translation with Open-Source Models*,
-UF Journal of Undergraduate Research, Spring 2025.
-
-## License
-
-MIT, see [LICENSE](LICENSE).
+MIT, veja [LICENSE](LICENSE). O aviso de copyright original foi mantido.

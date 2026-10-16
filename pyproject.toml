@@ -53,8 +53,8 @@ speech-translate-web = "speech_translate.webui:main"
 speech-translate-bench = "speech_translate.benchmark:main"
 
 [project.urls]
-Homepage = "https://github.com/gebrilfradj/realtime-speech-translator"
-Repository = "https://github.com/gebrilfradj/realtime-speech-translator"
+Homepage = "https://github.com/christianferraz/realtime-speech-translator"
+Repository = "https://github.com/christianferraz/realtime-speech-translator"
 
 [tool.setuptools.packages.find]
 include = ["speech_translate*"]
