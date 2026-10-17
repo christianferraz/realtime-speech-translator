@@ -653,7 +653,12 @@ def main(argv: list[str] | None = None) -> int:
     demo = build_demo(settings, preload=args.preload)
     if args.preload:
         logger.info("Models ready in %.1f s", time.perf_counter() - started)
-    launch_demo(demo.queue(), server_name=args.host, server_port=args.port, share=args.share)
+    try:
+        launch_demo(demo.queue(), server_name=args.host, server_port=args.port, share=args.share)
+    except KeyboardInterrupt:
+        # A second Ctrl+C while Gradio waits for open browser connections to
+        # close lands here; exit quietly instead of printing a traceback.
+        return 130
     return 0
 
 
